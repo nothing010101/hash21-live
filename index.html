@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hash21 Live Mining</title>
+<meta name="description" content="Dashboard live read-only untuk mining Hash21 di BNB Chain. Tidak menyimpan private key dan tidak menandatangani transaksi.">
+<style>
+  :root { color-scheme: dark; --gold:#d4af37; --bg:#0b0e14; --card:#141a26; --muted:#9aa7bd; --good:#3ddc84; --bad:#ff6b6b; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:var(--bg); color:#eef2f8; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 20px 16px 40px; }
+  h1 { color: var(--gold); font-size: 26px; margin: 8px 0 4px; }
+  p.sub { color: var(--muted); margin: 0 0 18px; line-height: 1.5; }
+  .card { background: var(--card); border: 1px solid #243044; border-radius: 14px; padding: 16px; margin-bottom: 14px; }
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+  @media (max-width: 600px) { .grid { grid-template-columns: 1fr; } }
+  .stat-label { color: var(--muted); font-size: 13px; }
+  .stat-value { font-size: 26px; font-weight: 700; margin-top: 4px; word-break: break-all; }
+  .stat-sub { color: var(--muted); font-size: 13px; margin-top: 4px; line-height: 1.5; }
+  label { display:block; color: var(--muted); font-size: 13px; margin-bottom: 6px; }
+  input { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #2c3a52; background: #0b0e14; color: #fff; font-family: monospace; font-size: 14px; }
+  button { margin-top: 10px; padding: 11px 16px; border: 0; border-radius: 10px; background: var(--gold); color: #111; font-weight: 700; cursor: pointer; }
+  button.secondary { background: #243044; color: #fff; }
+  .badge { display:inline-block; padding: 4px 10px; border-radius: 999px; font-size: 13px; font-weight: 700; }
+  .ok { background: #123524; color: var(--good); } .no { background: #3a1414; color: var(--bad); }
+  .bar { height: 10px; background: #243044; border-radius: 999px; overflow: hidden; margin-top: 8px; }
+  .bar > div { height: 100%; background: var(--gold); width: 0%; }
+  code { word-break: break-all; background: #0b0e14; padding: 2px 6px; border-radius: 6px; font-size: 12px; }
+  .mono { font-family: monospace; }
+  .warn { border-color: #5a3d00; background: #1d1705; }
+  #err { color: var(--bad); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Hash21 Live Mining</h1>
+  <p class="sub">Dashboard <b>read-only</b> untuk mining Hash21 (BNB Chain). Data dibaca langsung dari kontrak lewat RPC publik, diperbarui tiap 5 detik, dan pending ditaksir per detik di antara polling. Aplikasi ini <b>tidak</b> menyimpan private key, tidak meminta seed phrase, dan tidak menandatangani apa pun.</p>
+
+  <div class="card">
+    <label for="addr">Alamat wallet BSC (0x…)</label>
+    <input id="addr" value="0x9707C99D8247fBBB5E806a389160372602578009" spellcheck="false" autocomplete="off">
+    <button id="load">Muat live</button>
+    <button class="secondary" id="copyClaim">Salin perintah claim (baw)</button>
+    <div class="stat-sub" id="err"></div>
+    <div class="stat-sub">Terakhir diperbarui: <span id="updated">—</span> · RPC: <span id="rpcUsed">—</span></div>
+  </div>
+
+  <div class="grid">
+    <div class="card"><div class="stat-label">Hash power saya</div><div class="stat-value" id="myHash">—</div><div class="stat-sub"><span id="statusBadge"></span><br>Status: <span id="statusText">—</span></div></div>
+    <div class="card"><div class="stat-label">Pending (live, taksiran)</div><div class="stat-value" id="pending">—</div><div class="stat-sub">Taksiran = pending terakhir dari kontrak + rate × detik sejak polling. Angka kontrak saat claim adalah yang sah.</div></div>
+    <div class="card"><div class="stat-label">Rate saya</div><div class="stat-value" id="rateSec">—</div><div class="stat-sub" id="rateSub">—</div></div>
+    <div class="card"><div class="stat-label">Saldo HASH di wallet</div><div class="stat-value" id="bal">—</div><div class="stat-sub">Sudah di-claim: <span id="claimed">—</span> HASH</div></div>
+    <div class="card"><div class="stat-label">Total hash network</div><div class="stat-value" id="totalHash">—</div><div class="stat-sub">Share saya: <span id="share">—</span><br>Rate network: <span id="netRate">—</span> HASH/detik · Epoch: <span id="epoch">—</span></div></div>
+    <div class="card"><div class="stat-label">Menuju miner berikutnya</div><div class="stat-value" id="nextMiner">—</div><div class="stat-sub" id="nextSub">—</div><div class="bar"><div id="nextBar"></div></div></div>
+  </div>
+
+  <div class="card">
+    <div class="stat-label">Miner yang saya miliki (per tier)</div>
+    <div class="stat-sub mono" id="owned">—</div>
+    <div class="stat-sub">Tier: 1 = 100 HASH → 10H (maks 10) · 2 = 500 → 55H (maks 5) · 3 = 1.000 → 120H (maks 3) · 4 = 2.000 → 245H (maks 2) · 5 = 5.000 → 750H · 6 = 10.000 → 1.700H · 7 = 20.000 → 3.500H · 8 = 50.000 → 10.000H. Miner dibeli pakai HASH yang 100% dibakar, setelah aktivasi $4.</div>
+  </div>
+
+  <div class="card warn">
+    <b>Cara claim</b>
+    <p class="sub" style="margin-top:8px">Claim tidak bisa dari aplikasi ini karena wallet agen Binance tidak punya private key yang bisa diekspor. Jalankan salah satu:<br>
+    1) Buka <a href="https://hash21.online/me/" target="_blank" rel="noreferrer" style="color:var(--gold)">hash21.online/me</a>, hubungkan wallet, tekan claim.<br>
+    2) Lewat baw (perintahnya bisa disalin dengan tombol di atas):<br>
+    <code>baw contract-call preview --binanceChainId 56 --from &lt;alamat&gt; --to 0x6884D40B10c55A6c2faB2D3c829d41c3C798279D --value 0 --inputData 0x4e71d92d --json</code><br>
+    lalu <code>baw contract-call execute --requestId &lt;id-dari-preview&gt; --json</code> setelah preview bersih.<br>
+    Kontrak pool: <code>0x6884D40B10c55A6c2faB2D3c829d41c3C798279D</code> · Token HASH: <code>0x6a87DE92deb752c6162CF80Bd16E3eFd4BDc6D90</code></p>
+  </div>
+</div>
+<script>
+const POOL = "0x6884D40B10c55A6c2faB2D3c829d41c3C798279D";
+const HASH = "0x6a87DE92deb752c6162CF80Bd16E3eFd4BDc6D90";
+const RPCS = ["https://bsc-dataseed.binance.org", "https://bsc-rpc.publicnode.com", "https://rpc.ankr.com/bsc"];
+const SEL = { accountOf: "0x8086b8ba", pendingOf: "0xf44136a1", stats: "0xd80528ae", balanceOf: "0x70a08231" };
+const TIERS = [
+  { price: 100, hash: 10, limit: 10 }, { price: 500, hash: 55, limit: 5 },
+  { price: 1000, hash: 120, limit: 3 }, { price: 2000, hash: 245, limit: 2 },
+  { price: 5000, hash: 750, limit: 1 }, { price: 10000, hash: 1700, limit: 1 },
+  { price: 20000, hash: 3500, limit: 1 }, { price: 50000, hash: 10000, limit: 1 },
+];
+const $ = id => document.getElementById(id);
+const pad = a => a.toLowerCase().replace(/^0x/, "").padStart(64, "0");
+const fmt = (n, d=4) => n.toLocaleString("id-ID", { maximumFractionDigits: d, minimumFractionDigits: 0 });
+const words = hex => { hex = hex.replace(/^0x/, ""); const out = []; for (let i = 0; i < hex.length; i += 64) out.push(BigInt("0x" + (hex.slice(i, i + 64) || "0"))); return out; };
+const div18 = b => Number(b) / 1e18;
+let state = { myHash: 0, rateSec: 0, pendingBase: 0, pendingAt: 0, balance: 0, claimed: 0, totalHash: 0, netRate: 0, owned: [] };
+let pollTimer = null, tickTimer = null;
+
+async function call(to, data) {
+  let lastErr = null;
+  for (const rpc of RPCS) {
+    try {
+      const r = await fetch(rpc, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to, data }, "latest"] }) });
+      const j = await r.json();
+      if (j.error) throw new Error(j.error.message || "RPC error");
+      $("rpcUsed").textContent = rpc.replace("https://", "");
+      return j.result;
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr || new Error("Semua RPC gagal");
+}
+
+async function refresh() {
+  const addr = $("addr").value.trim();
+  if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) { $("err").textContent = "Alamat tidak valid. Pakai format 0x + 40 karakter hex."; return; }
+  $("err").textContent = "";
+  try {
+    const [accHex, pendHex, statsHex, balHex] = await Promise.all([
+      call(POOL, SEL.accountOf + pad(addr)),
+      call(POOL, SEL.pendingOf + pad(addr)),
+      call(POOL, SEL.stats),
+      call(HASH, SEL.balanceOf + pad(addr)),
+    ]);
+    const acc = words(accHex), st = words(statsHex);
+    // accountOf: hash, debt, pending, claimed, registered, activated, owned[8]
+    state.myHash = div18(acc[0]);
+    state.claimed = div18(acc[3]);
+    state.owned = acc.slice(6, 14).map(x => Number(x));
+    state.pendingBase = div18(words(pendHex)[0]);
+    state.pendingAt = Date.now();
+    // stats: totalHash, emittedTotal, totalMinted, totalBurned, supplyCap, epoch, halvingInterval, toNextHalving, ratePerSecond, ...
+    state.totalHash = div18(st[0]);
+    state.netRate = div18(st[8]);
+    state.epoch = Number(st[5]);
+    state.balance = div18(words(balHex)[0]);
+    state.rateSec = state.totalHash > 0 ? state.netRate * state.myHash / state.totalHash : 0;
+    render();
+    $("updated").textContent = new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }) + " WIB";
+  } catch (e) {
+    $("err").textContent = "Gagal membaca kontrak: " + e.message;
+  }
+}
+
+function render() {
+  $("myHash").textContent = fmt(state.myHash, 2) + " H";
+  const reg = state.myHash > 0;
+  $("statusBadge").innerHTML = reg ? '<span class="badge ok">Terdaftar</span>' : '<span class="badge no">Belum terdaftar</span>';
+  $("statusText").textContent = reg ? "Akun terdaftar di pool." : "Hubungkan / daftar dulu di hash21.online.";
+  $("bal").textContent = fmt(state.balance) + " HASH";
+  $("claimed").textContent = fmt(state.claimed);
+  $("totalHash").textContent = fmt(state.totalHash, 0) + " H";
+  $("share").textContent = state.totalHash > 0 ? (state.myHash / state.totalHash * 100).toFixed(4) + "%" : "—";
+  $("netRate").textContent = fmt(state.netRate, 2);
+  $("epoch").textContent = state.epoch ?? "—";
+  $("rateSec").textContent = state.rateSec.toFixed(6) + " HASH/detik";
+  $("rateSub").textContent = fmt(state.rateSec * 3600) + " / jam · " + fmt(state.rateSec * 86400) + " / hari · " + fmt(state.rateSec * 86400 * 30) + " / 30 hari (kalau network diam; rate turun kalau total hash naik).";
+  $("owned").textContent = state.owned.map((n, i) => `Tier ${i + 1}: ${n}/${TIERS[i].limit}`).join("  ·  ");
+  // Next affordable tier (respecting per-wallet limit), based on balance + live pending
+  const avail = state.balance + livePending();
+  let next = null;
+  for (let i = 0; i < TIERS.length; i++) {
+    if (state.owned[i] < TIERS[i].limit) { next = { i, ...TIERS[i] }; break; }
+  }
+  if (!next) { $("nextMiner").textContent = "Semua tier sudah maks"; $("nextSub").textContent = ""; $("nextBar").style.width = "100%"; }
+  else {
+    $("nextMiner").textContent = `Tier ${next.i + 1} (${next.hash}H) — ${fmt(next.price, 0)} HASH`;
+    const pct = Math.min(100, avail / next.price * 100);
+    $("nextBar").style.width = pct + "%";
+    $("nextSub").textContent = state.rateSec > 0
+      ? `Tersedia sekarang (saldo + pending): ${fmt(avail)} HASH (${pct.toFixed(1)}%). Kurang ${fmt(Math.max(0, next.price - avail))} HASH, kira-kira ${fmt(Math.max(0, next.price - avail) / state.rateSec / 3600, 1)} jam lagi di rate sekarang.`
+      : `Tersedia sekarang: ${fmt(avail)} HASH (${pct.toFixed(1)}%).`;
+  }
+}
+
+function livePending() {
+  if (!state.pendingAt) return state.pendingBase;
+  return state.pendingBase + state.rateSec * (Date.now() - state.pendingAt) / 1000;
+}
+
+function tick() {
+  if (state.pendingAt) { $("pending").textContent = fmt(livePending()) + " HASH"; renderNextOnly(); }
+}
+function renderNextOnly() {
+  // Keep the "next miner" progress live without redrawing everything every second.
+  const avail = state.balance + livePending();
+  for (let i = 0; i < TIERS.length; i++) {
+    if (state.owned[i] < TIERS[i].limit) {
+      const t = TIERS[i], pct = Math.min(100, avail / t.price * 100);
+      $("nextBar").style.width = pct + "%";
+      $("nextSub").textContent = state.rateSec > 0
+        ? `Tersedia sekarang (saldo + pending): ${fmt(avail)} HASH (${pct.toFixed(1)}%). Kurang ${fmt(Math.max(0, t.price - avail))} HASH, kira-kira ${fmt(Math.max(0, t.price - avail) / state.rateSec / 3600, 1)} jam lagi di rate sekarang.`
+        : `Tersedia sekarang: ${fmt(avail)} HASH (${pct.toFixed(1)}%).`;
+      break;
+    }
+  }
+}
+
+$("load").onclick = () => { localStorage.setItem("h21_addr", $("addr").value.trim()); refresh(); };
+$("copyClaim").onclick = async () => {
+  const addr = $("addr").value.trim();
+  const cmd = `baw contract-call preview --binanceChainId 56 --from ${addr} --to ${POOL} --value 0 --inputData 0x4e71d92d --json`;
+  try { await navigator.clipboard.writeText(cmd); $("err").textContent = "Perintah claim tersalin. Jalankan preview dulu, lalu execute dengan requestId dari preview."; }
+  catch { prompt("Salin perintah claim ini:", cmd); }
+};
+const saved = localStorage.getItem("h21_addr");
+if (saved) $("addr").value = saved;
+refresh();
+pollTimer = setInterval(refresh, 5000);
+tickTimer = setInterval(tick, 1000);
+</script>
+</body>
+</html>
